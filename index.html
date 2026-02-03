@@ -29,11 +29,18 @@
 
         h1 { margin-bottom: 20px; font-size: 24px; }
 
-        /* --- コンサーティーナ本体 --- */
-        .concertina-container {
+        /* --- 上部エリア（楽器＋プリセット） --- */
+        .top-area {
             display: flex;
             gap: 40px;
             margin-bottom: 20px;
+            align-items: flex-start;
+        }
+
+        /* --- コンサーティーナ本体 --- */
+        .concertina-wrapper {
+            display: flex;
+            gap: 20px;
         }
 
         .hand-panel {
@@ -69,12 +76,56 @@
         .c-btn.push { background-color: var(--active-push); color: white; border-color: darkred; }
         .c-btn.pull { background-color: var(--active-pull); color: white; border-color: darkblue; }
 
+        /* --- プリセットエリア（右側） --- */
+        .preset-panel {
+            background: var(--panel-bg);
+            padding: 15px;
+            border-radius: 10px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+            width: 250px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .preset-title { font-weight: bold; margin-bottom: 5px; text-align: center; }
+        
+        .preset-row {
+            display: flex;
+            gap: 5px;
+        }
+        .preset-load-btn {
+            flex: 1;
+            padding: 8px;
+            font-size: 12px;
+            cursor: pointer;
+            background: #eee;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            text-align: left;
+            overflow: hidden;
+            white-space: nowrap;
+            text-overflow: ellipsis;
+        }
+        .preset-load-btn:hover { background: #ddd; }
+        .preset-load-btn.active { background: #d1e7dd; border-color: #0f5132; }
+
+        .preset-save-btn {
+            width: 50px;
+            cursor: pointer;
+            background: #fff;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            font-size: 11px;
+            color: #555;
+        }
+        .preset-save-btn:hover { background: #f0f0f0; color: #000; }
+
         /* --- コントロールエリア --- */
         .controls-container {
             display: flex;
             gap: 20px;
             width: 100%;
-            max-width: 1000px;
+            max-width: 1100px;
             height: 350px;
             margin-bottom: 20px;
         }
@@ -146,7 +197,6 @@
             position: relative;
             height: 120px;
             display: flex;
-            /* widthはJSで動的に設定しないと黒鍵がはみ出る場合があるが、flexで白鍵を並べるので自動で伸びる */
         }
 
         .key {
@@ -159,7 +209,7 @@
             font-size: 10px;
             cursor: pointer;
             user-select: none;
-            box-sizing: border-box; /* 枠線を幅に含める */
+            box-sizing: border-box; 
         }
         
         .key.white {
@@ -209,14 +259,22 @@
 
     <div id="notification">NO FINGERING FOUND<br>(Impossible)</div>
 
-    <div class="concertina-container">
-        <div class="hand-panel">
-            <div class="hand-title">Left Hand</div>
-            <div id="left-grid" class="button-grid"></div>
+    <div class="top-area">
+        <div class="concertina-wrapper">
+            <div class="hand-panel">
+                <div class="hand-title">Left Hand</div>
+                <div id="left-grid" class="button-grid"></div>
+            </div>
+            <div class="hand-panel">
+                <div class="hand-title">Right Hand</div>
+                <div id="right-grid" class="button-grid"></div>
+            </div>
         </div>
-        <div class="hand-panel">
-            <div class="hand-title">Right Hand</div>
-            <div id="right-grid" class="button-grid"></div>
+
+        <div class="preset-panel">
+            <div class="preset-title">Saved Fingerings</div>
+            <div id="preset-list">
+                </div>
         </div>
     </div>
 
@@ -232,17 +290,17 @@
         <div class="selector-panel">
             <div class="radio-group" id="root-group">
                 <span class="radio-label">Root:</span>
-                </div>
+            </div>
             <div class="divider"></div>
             
             <div class="radio-group" id="type-group">
                 <span class="radio-label">Type:</span>
-                </div>
+            </div>
             <div class="divider"></div>
 
             <div class="radio-group" id="base-group">
                 <span class="radio-label">On Base:</span>
-                </div>
+            </div>
         </div>
     </div>
 
@@ -297,13 +355,21 @@ let currentBase = "None";
 let pushPatterns = [];
 let pullPatterns = [];
 
+// 現在表示中のパターン情報（保存用）
+let currentActivePattern = null; 
+
+// プリセットデータ
+let presets = Array(8).fill(null); 
+
 /**
  * 初期化
  */
 window.onload = function() {
+    loadPresetsFromStorage(); // 保存データの読み込み
     initConcertinaButtons();
     initPiano();
     initControls();
+    initPresetsUI();
     searchFingerings(); // 初期検索
 };
 
@@ -362,15 +428,8 @@ function createRadios(containerId, name, values, defValue) {
 function initPiano() {
     const wrapper = document.getElementById("piano-wrapper");
     const whiteKeys = ["C", "D", "E", "F", "G", "A", "B"];
-    // 黒鍵は「前の白鍵」の右端に位置する。白鍵幅30px, 黒鍵幅20px。
-    // 例: C#(index 1) は C(index 0) の右。 境界は (0+1)*30 = 30px。
-    // 中心を境界に合わせる => left = 30 - (20/2) = 20px。
-    // オフセット値は「黒鍵が乗っている境界線」のインデックス (1=CとDの間)
     const blackOffsets = {"C#": 1, "D#": 2, "F#": 4, "G#": 5, "A#": 6};
     
-    // C3 - B6
-    
-    // 白鍵生成
     for (let oct = 3; oct <= 6; oct++) {
         whiteKeys.forEach(note => {
             const fullNote = `${note}${oct}`;
@@ -382,24 +441,93 @@ function initPiano() {
         });
     }
 
-    // 黒鍵生成
     for (let oct = 3; oct <= 6; oct++) {
-        const baseLeft = (oct - 3) * (30 * 7); // 30px * 7keys per octave
-        
+        const baseLeft = (oct - 3) * (30 * 7); 
         for (const [note, gapIdx] of Object.entries(blackOffsets)) {
             const fullNote = `${note}${oct}`;
             const key = document.createElement("div");
             key.className = `key black ${EXISTING_NOTES.has(fullNote) ? '' : 'disabled'}`;
-            
-            // 計算修正箇所:
-            // gapIdx * 30 で境界線の位置。
-            // そこから黒鍵の半分の幅 (10px) を引くことで中心を合わせる。
             const left = baseLeft + (gapIdx * 30) - 10;
-            
             key.style.left = `${left}px`;
             key.onclick = () => showNote(fullNote);
             wrapper.appendChild(key);
         }
+    }
+}
+
+/**
+ * プリセット機能
+ */
+function initPresetsUI() {
+    const container = document.getElementById("preset-list");
+    container.innerHTML = "";
+
+    for (let i = 0; i < 8; i++) {
+        const row = document.createElement("div");
+        row.className = "preset-row";
+
+        // 呼び出しボタン
+        const loadBtn = document.createElement("div");
+        loadBtn.className = "preset-load-btn";
+        loadBtn.id = `preset-load-${i}`;
+        loadBtn.textContent = presets[i] ? presets[i].name : `Empty ${i+1}`;
+        loadBtn.onclick = () => loadPreset(i);
+
+        // 保存ボタン
+        const saveBtn = document.createElement("button");
+        saveBtn.className = "preset-save-btn";
+        saveBtn.textContent = "保存";
+        saveBtn.onclick = () => savePreset(i);
+
+        row.appendChild(loadBtn);
+        row.appendChild(saveBtn);
+        container.appendChild(row);
+    }
+}
+
+function savePreset(index) {
+    if (!currentActivePattern) {
+        alert("保存する運指パターンを選択してください");
+        return;
+    }
+
+    const name = `${currentRoot} ${currentType}${currentBase!=="None"?"/"+currentBase:""} (${currentActivePattern.action})`;
+    
+    presets[index] = {
+        name: name,
+        action: currentActivePattern.action,
+        buttons: currentActivePattern.buttons
+    };
+
+    // UI更新
+    document.getElementById(`preset-load-${index}`).textContent = name;
+    
+    // ローカルストレージに保存
+    localStorage.setItem("concertina_presets", JSON.stringify(presets));
+}
+
+function loadPreset(index) {
+    const p = presets[index];
+    if (!p) return;
+
+    resetDisplay();
+    // プリセットボタンのアクティブ表示
+    document.querySelectorAll(".preset-load-btn").forEach(b => b.classList.remove("active"));
+    document.getElementById(`preset-load-${index}`).classList.add("active");
+
+    const colorClass = p.action === "Push" ? "push" : "pull";
+    p.buttons.forEach(b => {
+        const el = document.getElementById(`${b.side}_${b.no}`);
+        if(el) el.classList.add(colorClass);
+    });
+}
+
+function loadPresetsFromStorage() {
+    const stored = localStorage.getItem("concertina_presets");
+    if (stored) {
+        try {
+            presets = JSON.parse(stored);
+        } catch(e) { console.error("Load failed", e); }
     }
 }
 
@@ -412,6 +540,8 @@ function resetDisplay() {
     });
     document.getElementById("notification").style.display = "none";
     document.querySelectorAll(".pat-btn").forEach(b => b.classList.remove("selected"));
+    document.querySelectorAll(".preset-load-btn").forEach(b => b.classList.remove("active"));
+    currentActivePattern = null;
 }
 
 function showNote(note) {
@@ -436,16 +566,15 @@ function searchFingerings() {
     resetDisplay();
     let notes = calculateChordNotes(currentRoot, currentType);
     if (currentBase !== "None") {
-        notes.unshift(currentBase); // ベース音を先頭に
+        notes.unshift(currentBase);
     }
 
     if (notes.length === 0) return;
 
-    // 重複除去 (順序維持)
     let uniqueNotes = [];
     let seen = new Set();
     notes.forEach((n, i) => {
-        if (i === 0) { uniqueNotes.push(n); } // ベース音は必ず入れる
+        if (i === 0) { uniqueNotes.push(n); }
         else if (!seen.has(n)) { uniqueNotes.push(n); seen.add(n); }
     });
     const targetNotes = uniqueNotes;
@@ -462,25 +591,18 @@ function searchFingerings() {
 }
 
 function findCombinations(notes, action) {
-    // 1. 各音ごとの候補ボタンを探す
     const candidates = notes.map(n => 
         DATA.filter(d => d.note.replace(/[0-9]/g, '') === n && d.action === action)
     );
 
-    // 候補がない音があれば終了
     if (candidates.some(c => c.length === 0)) return [];
 
-    // 2. 直積 (Cartesian Product)
     const combos = cartesian(candidates);
     
-    // 3. 条件フィルタ
     const validCombos = [];
     combos.forEach(combo => {
-        // 条件1: ルート(ベース)は左手
         if (combo[0].side !== "Left") return;
 
-        // 条件2: 各手2音まで
-        // 重複ボタン排除
         const uniqueSet = new Set(combo.map(b => `${b.side}_${b.no}`));
         let leftCount = 0;
         let rightCount = 0;
@@ -497,12 +619,11 @@ function findCombinations(notes, action) {
     return validCombos;
 }
 
-// ヘルパー: 配列の直積
 function cartesian(args) {
     var r = [], max = args.length-1;
     function helper(arr, i) {
         for (var j=0, l=args[i].length; j<l; j++) {
-            var a = arr.slice(0); // clone
+            var a = arr.slice(0);
             a.push(args[i][j]);
             if (i==max) r.push(a);
             else helper(a, i+1);
@@ -540,7 +661,9 @@ function updatePatternList(elementId, patterns, type) {
 function displayPattern(pattern, index, type) {
     resetDisplay();
     
-    // リストのハイライト
+    // 現在表示中のパターンを記録（保存用）
+    currentActivePattern = pattern;
+
     const btn = document.getElementById(`pat-${type}-${index}`);
     if (btn) btn.classList.add("selected");
 
